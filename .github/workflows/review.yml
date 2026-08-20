@@ -25,13 +25,38 @@ jobs:
         id: run_tests
         run: |
           pip install pytest
-          python -m pytest -v 2>&1 | tee /tmp/test_output.txt
-          echo "exit_code=${PIPESTATUS[0]}" >> $GITHUB_OUTPUT
+
+          # Create a file to store all test outputs
+          echo "" > /tmp/all_test_output.txt
+          TOTAL_EXIT_CODE=0
+
+          # Find all directories with test files and run tests in each
+          for dir in */; do
+            if [ -d "$dir" ] && [ -f "$dir/test_math_utils.py" ]; then
+              echo "Running tests in $dir..." >> /tmp/all_test_output.txt
+              echo "========================================" >> /tmp/all_test_output.txt
+
+              # Run tests in this directory
+              cd "$dir"
+              python -m pytest -v 2>&1 | tee -a /tmp/all_test_output.txt
+              DIR_EXIT_CODE=${PIPESTATUS[0]}
+              cd ..
+
+              # Track if any directory failed
+              if [ $DIR_EXIT_CODE -ne 0 ]; then
+                TOTAL_EXIT_CODE=1
+              fi
+
+              echo "" >> /tmp/all_test_output.txt
+            fi
+          done
+
+          echo "exit_code=$TOTAL_EXIT_CODE" >> $GITHUB_OUTPUT
 
       - name: Create review comment
         run: |
           # Read test output
-          TEST_OUTPUT=$(cat /tmp/test_output.txt)
+          TEST_OUTPUT=$(cat /tmp/all_test_output.txt)
 
           # Create review
           echo "## Automated PR Review" > /tmp/review.md
@@ -48,7 +73,7 @@ jobs:
             # Extract failed test names
             echo "### 🐛 Failed Tests:" >> /tmp/review.md
             echo "" >> /tmp/review.md
-            grep "FAILED" /tmp/test_output.txt | sed 's/.*FAILED //' | sed 's/ -.*//' | while read test; do
+            grep "FAILED" /tmp/all_test_output.txt | sed 's/.*FAILED //' | sed 's/ -.*//' | while read test; do
               echo "- \`$test\`" >> /tmp/review.md
             done
             echo "" >> /tmp/review.md
@@ -56,7 +81,7 @@ jobs:
             # Show error details
             echo "### 📋 Error Details:" >> /tmp/review.md
             echo '```' >> /tmp/review.md
-            grep -A 10 "AssertionError\|ERROR\|assert" /tmp/test_output.txt >> /tmp/review.md || true
+            grep -A 10 "AssertionError\|ERROR\|assert" /tmp/all_test_output.txt >> /tmp/review.md || true
             echo '```' >> /tmp/review.md
             echo "" >> /tmp/review.md
 
