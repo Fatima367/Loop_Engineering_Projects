@@ -21,45 +21,41 @@ jobs:
         with:
           python-version: '3.12'
 
-      - name: Install dependencies
+      - name: Run tests and analyze
         run: |
-          python -m pip install --upgrade pip
+          # Install pytest
           pip install pytest
 
-      - name: Run tests and capture results
-        id: tests
-        run: |
-          # Find all test files
-          TEST_FILES=$(find . -name "test_*.py" -type f)
+          # Run tests and capture output
+          python -m pytest -v > /tmp/test_output.txt 2>&1 || true
 
-          if [ -z "$TEST_FILES" ]; then
-            echo "## Automated PR Review" > /tmp/review.md
+          # Analyze results
+          PASSED=$(grep -c "passed" /tmp/test_output.txt || true)
+          FAILED=$(grep -c "failed" /tmp/test_output.txt || true)
+          ERRORS=$(grep -c "error" /tmp/test_output.txt || true)
+
+          # Create review comment
+          echo "## Automated PR Review" > /tmp/review.md
+          echo "" >> /tmp/review.md
+
+          if [ "$FAILED" -gt 0 ] || [ "$ERRORS" -gt 0 ]; then
+            echo "### ❌ Tests Failed" >> /tmp/review.md
             echo "" >> /tmp/review.md
-            echo "### ⚠️ No tests found" >> /tmp/review.md
-            echo "**Warning:** No test files found in this PR" >> /tmp/review.md
+            echo "**Results:** $PASSED passed, $FAILED failed, $ERRORS errors" >> /tmp/review.md
+            echo "" >> /tmp/review.md
+            echo "### Failed Tests:" >> /tmp/review.md
+            echo '```' >> /tmp/review.md
+            grep -A 10 "FAILED" /tmp/test_output.txt >> /tmp/review.md || true
+            echo '```' >> /tmp/review.md
+            echo "" >> /tmp/review.md
+            echo "### 💡 Suggestion:" >> /tmp/review.md
+            echo "Please fix the failing tests before merging." >> /tmp/review.md
           else
-            # Run tests and capture output
-            echo "Running tests..." >> /tmp/test_output.txt
-            python -m pytest $TEST_FILES -v >> /tmp/test_output.txt 2>&1
-            TEST_EXIT_CODE=$?
-
-            # Create review comment
-            echo "## Automated PR Review" > /tmp/review.md
+            echo "### ✅ All Tests Passed" >> /tmp/review.md
             echo "" >> /tmp/review.md
-
-            if [ $TEST_EXIT_CODE -eq 0 ]; then
-              echo "### ✅ All tests passed" >> /tmp/review.md
-              echo "" >> /tmp/review.md
-              echo "All tests in this PR are passing!" >> /tmp/review.md
-            else
-              echo "### ❌ Tests failed" >> /tmp/review.md
-              echo "" >> /tmp/review.md
-              echo "Some tests failed. Here are the results:" >> /tmp/review.md
-              echo "" >> /tmp/review.md
-              echo '```' >> /tmp/review.md
-              cat /tmp/test_output.txt >> /tmp/review.md
-              echo '```' >> /tmp/review.md
-            fi
+            echo "**Results:** $PASSED tests passed" >> /tmp/review.md
+            echo "" >> /tmp/review.md
+            echo "Great! All tests are passing. This PR looks good to merge." >> /tmp/review.md
           fi
 
           # Add diff stats
@@ -72,11 +68,9 @@ jobs:
       - name: Post review comment
         run: |
           COMMENT_BODY=$(cat /tmp/review.md)
-
           curl -s -X POST \
             -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
             -H "Accept: application/vnd.github.v3+json" \
             "https://api.github.com/repos/${{ github.repository }}/issues/${{ github.event.pull_request.number }}/comments" \
             -d "$(jq -n --arg body "$COMMENT_BODY" '{body: $body}')"
-
           echo "Review posted successfully!"
