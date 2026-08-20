@@ -12,7 +12,7 @@ jobs:
     permissions:
       id-token: write
       contents: read
-      pull-requests: write
+      pull-requests: read
       issues: read
 
     steps:
@@ -23,5 +23,7 @@ jobs:
 
       - name: Run opencode
         uses: anomalyco/opencode/github@latest
+        env:
+          OPENCODE_API_KEY: ${{ secrets.OPENCODE_API_KEY }}
         with:
           model: opencode/kimi-k2.5-free
