@@ -16,37 +16,61 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Run review script
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.12'
+
+      - name: Install dependencies
         run: |
-          # Get the PR diff
-          DIFF=$(git diff origin/${{ github.base_ref }}...HEAD)
+          python -m pip install --upgrade pip
+          pip install pytest
 
-          # Initialize review
-          REVIEW="## Automated PR Review\n\n"
-          ISSUES_FOUND=0
+      - name: Run tests and capture results
+        id: tests
+        run: |
+          # Find all test files
+          TEST_FILES=$(find . -name "test_*.py" -type f)
 
-          # Check for the specific off-by-one bug in Python files only
-          if echo "$DIFF" | grep -E "^\+.*sum\(items\[1:\]\)" | grep -q "\.py"; then
-            REVIEW+="### 🐛 Bug Found: Off-by-one error\n"
-            REVIEW+="**Issue:** Using \`items[1:]\` skips the first item\n"
-            REVIEW+="**Fix:** Use \`items\` instead of \`items[1:]\`\n\n"
-            ISSUES_FOUND=$((ISSUES_FOUND + 1))
-          fi
-
-          # Summary
-          if [ $ISSUES_FOUND -eq 0 ]; then
-            REVIEW+="### ✅ No issues found\n"
+          if [ -z "$TEST_FILES" ]; then
+            echo "## Automated PR Review" > /tmp/review.md
+            echo "" >> /tmp/review.md
+            echo "### ⚠️ No tests found" >> /tmp/review.md
+            echo "**Warning:** No test files found in this PR" >> /tmp/review.md
           else
-            REVIEW+="### 📊 Found $ISSUES_FOUND issue(s)\n"
+            # Run tests and capture output
+            echo "Running tests..." >> /tmp/test_output.txt
+            python -m pytest $TEST_FILES -v >> /tmp/test_output.txt 2>&1
+            TEST_EXIT_CODE=$?
+
+            # Create review comment
+            echo "## Automated PR Review" > /tmp/review.md
+            echo "" >> /tmp/review.md
+
+            if [ $TEST_EXIT_CODE -eq 0 ]; then
+              echo "### ✅ All tests passed" >> /tmp/review.md
+              echo "" >> /tmp/review.md
+              echo "All tests in this PR are passing!" >> /tmp/review.md
+            else
+              echo "### ❌ Tests failed" >> /tmp/review.md
+              echo "" >> /tmp/review.md
+              echo "Some tests failed. Here are the results:" >> /tmp/review.md
+              echo "" >> /tmp/review.md
+              echo '```' >> /tmp/review.md
+              cat /tmp/test_output.txt >> /tmp/review.md
+              echo '```' >> /tmp/review.md
+            fi
           fi
 
           # Add diff stats
-          REVIEW+="\n### 📈 Diff Stats\n\`\`\`\n"
-          REVIEW+=$(git diff --stat origin/${{ github.base_ref }}...HEAD)
-          REVIEW+="\n\`\`\`"
+          echo "" >> /tmp/review.md
+          echo "### 📈 Diff Stats" >> /tmp/review.md
+          echo '```' >> /tmp/review.md
+          git diff --stat origin/${{ github.base_ref }}...HEAD >> /tmp/review.md
+          echo '```' >> /tmp/review.md
 
-          # Post comment using GitHub API with proper newline handling
-          echo -e "$REVIEW" > /tmp/review.md
+      - name: Post review comment
+        run: |
           COMMENT_BODY=$(cat /tmp/review.md)
 
           curl -s -X POST \
