@@ -84,32 +84,32 @@ $DIR"
           echo "" >> /tmp/review.md
 
           if [ "${{ steps.run_tests.outputs.exit_code }}" -eq 0 ]; then
-            echo "### ✅ All Tests Passed" >> /tmp/review.md
+            echo "### [PASS] All Tests Passed" >> /tmp/review.md
             echo "" >> /tmp/review.md
             echo "All tests in changed files are passing. This PR looks good!" >> /tmp/review.md
           else
-            echo "### ❌ Tests Failed" >> /tmp/review.md
+            echo "### [FAIL] Tests Failed" >> /tmp/review.md
             echo "" >> /tmp/review.md
 
-            echo "### 🐛 Failed Tests:" >> /tmp/review.md
+            echo "#### Failed Tests:" >> /tmp/review.md
             echo "" >> /tmp/review.md
             grep "FAILED" /tmp/all_test_output.txt | sed 's/.*FAILED //' | sed 's/ -.*//' | while read test; do
               echo "- \`$test\`" >> /tmp/review.md
             done
             echo "" >> /tmp/review.md
 
-            echo "### 📋 Error Details:" >> /tmp/review.md
+            echo "#### Error Details:" >> /tmp/review.md
             echo '```' >> /tmp/review.md
             grep -B 2 -A 5 "FAILED\|AssertionError\|assert " /tmp/all_test_output.txt >> /tmp/review.md || true
             echo '```' >> /tmp/review.md
             echo "" >> /tmp/review.md
 
-            echo "### 💡 Action Required" >> /tmp/review.md
+            echo "#### Action Required" >> /tmp/review.md
             echo "Please fix the failing tests before merging." >> /tmp/review.md
           fi
 
           echo "" >> /tmp/review.md
-          echo "### 📈 Diff Stats" >> /tmp/review.md
+          echo "#### Diff Stats" >> /tmp/review.md
           echo '```' >> /tmp/review.md
           git diff --stat origin/${{ github.base_ref }}...HEAD >> /tmp/review.md
           echo '```' >> /tmp/review.md

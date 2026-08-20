@@ -33,10 +33,10 @@ def test_total_empty():
     assert total([]) == 0
 
 YOUR TASK:
-1. You are in an isolated worktree. The project is at: D:\\Documents\\ClassAssignments\\Marathon\\Loop_Engineering_Projects\\05_codify_the_body
+1. You are in an isolated worktree. The project is at: D:\\Documents\\Loop_Engineering_Projects\\05_codify_the_body
 2. Read math_utils.py to see the current code.
 3. Fix the bug — make the smallest possible change to total(). Do NOT touch test_math_utils.py.
-4. Run: cd D:\\Documents\\ClassAssignments\\Marathon\\Loop_Engineering_Projects\\05_codify_the_body && python -m pytest test_math_utils.py -v
+4. Run: cd D:\\Documents\\Loop_Engineering_Projects\\05_codify_the_body && python -m pytest test_math_utils.py -v
 5. Report your final answer as a JSON object on the last line:
 {"issue":"A","fix":"<one-line description>","tests_pass":true,"test_output":"<full pytest output>"}`,
     { label: 'fix:A', phase: 'Fix', isolation: 'worktree' }
@@ -63,10 +63,10 @@ def test_is_even_false():
     assert is_even(3) == False
 
 YOUR TASK:
-1. You are in an isolated worktree. The project is at: D:\\Documents\\ClassAssignments\\Marathon\\Loop_Engineering_Projects\\05_codify_the_body
+1. You are in an isolated worktree. The project is at: D:\\Documents\\Loop_Engineering_Projects\\05_codify_the_body
 2. Read math_utils.py to see the current code.
 3. Fix the bug — make the smallest possible change to is_even(). Do NOT touch test_math_utils.py.
-4. Run: cd D:\\Documents\\ClassAssignments\\Marathon\\Loop_Engineering_Projects\\05_codify_the_body && python -m pytest test_math_utils.py -v
+4. Run: cd D:\\Documents\\Loop_Engineering_Projects\\05_codify_the_body && python -m pytest test_math_utils.py -v
 5. Report your final answer as a JSON object on the last line:
 {"issue":"B","fix":"<one-line description>","tests_pass":true,"test_output":"<full pytest output>"}`,
     { label: 'fix:B', phase: 'Fix', isolation: 'worktree' }
@@ -93,10 +93,10 @@ def test_divide_exact():
     assert divide(10, 2) == 5.0
 
 YOUR TASK:
-1. You are in an isolated worktree. The project is at: D:\\Documents\\ClassAssignments\\Marathon\\Loop_Engineering_Projects\\05_codify_the_body
+1. You are in an isolated worktree. The project is at: D:\\Documents\\Loop_Engineering_Projects\\05_codify_the_body
 2. Read math_utils.py to see the current code.
 3. Fix the bug — make the smallest possible change to divide(). Do NOT touch test_math_utils.py.
-4. Run: cd D:\\Documents\\ClassAssignments\\Marathon\\Loop_Engineering_Projects\\05_codify_the_body && python -m pytest test_math_utils.py -v
+4. Run: cd D:\\Documents\\Loop_Engineering_Projects\\05_codify_the_body && python -m pytest test_math_utils.py -v
 5. Report your final answer as a JSON object on the last line:
 {"issue":"C","fix":"<one-line description>","tests_pass":true,"test_output":"<full pytest output>"}`,
     { label: 'fix:C', phase: 'Fix', isolation: 'worktree' }
@@ -120,8 +120,8 @@ THE FIXER REPORTED:
 ${JSON.stringify(fix, null, 2)}
 
 REVIEW STEPS:
-1. Read the CURRENT math_utils.py at D:\\Documents\\ClassAssignments\\Marathon\\Loop_Engineering_Projects\\05_codify_the_body\\math_utils.py to see what changed.
-2. Run the full test suite: cd D:\\Documents\\ClassAssignments\\Marathon\\Loop_Engineering_Projects\\05_codify_the_body && python -m pytest test_math_utils.py -v
+1. Read the CURRENT math_utils.py at D:\\Documents\\Loop_Engineering_Projects\\05_codify_the_body\\math_utils.py to see what changed.
+2. Run the full test suite: cd D:\\Documents\\Loop_Engineering_Projects\\05_codify_the_body && python -m pytest test_math_utils.py -v
 3. Check that test_math_utils.py was NOT modified.
 4. Verify the fix is the SMALLEST possible change (only the broken line changed).
 
