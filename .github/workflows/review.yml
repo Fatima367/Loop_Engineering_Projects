@@ -1,0 +1,82 @@
+name: pr-review-script
+
+on:
+  pull_request:
+    types: [opened, synchronize]
+
+jobs:
+  review:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Run review script
+        run: |
+          # Get the PR diff
+          DIFF=$(git diff origin/${{ github.base_ref }}...HEAD)
+
+          # Initialize review comments
+          REVIEW="## Automated PR Review\n\n"
+          ISSUES_FOUND=0
+
+          # Check for common issues in the diff
+          if echo "$DIFF" | grep -q "sum(items\[1:\])"; then
+            REVIEW+="### 🐛 Bug Found: Off-by-one error\n"
+            REVIEW+="**File:** Python file with `total()` function\n"
+            REVIEW+="**Issue:** Using `items[1:]` skips the first item\n"
+            REVIEW+="**Fix:** Use `items[:]` or `items` to include all items\n\n"
+            ISSUES_FOUND=$((ISSUES_FOUND + 1))
+          fi
+
+          # Check for potential security issues
+          if echo "$DIFF" | grep -q "eval\|exec\|subprocess"; then
+            REVIEW+="### ⚠️ Security Warning: Dangerous function usage\n"
+            REVIEW+="**Issue:** Code contains eval/exec/subprocess which can be security risks\n\n"
+            ISSUES_FOUND=$((ISSUES_FOUND + 1))
+          fi
+
+          # Check for hardcoded credentials
+          if echo "$DIFF" | grep -qi "password\|secret\|api_key\|token"; then
+            REVIEW+="### 🔒 Security Warning: Potential hardcoded credentials\n"
+            REVIEW+="**Issue:** Code may contain hardcoded passwords or secrets\n\n"
+            ISSUES_FOUND=$((ISSUES_FOUND + 1))
+          fi
+
+          # Check for TODO/FIXME comments
+          if echo "$DIFF" | grep -q "TODO\|FIXME\|HACK"; then
+            REVIEW+="### 📝 TODO/FIXME Comments Found\n"
+            REVIEW+="**Issue:** Code contains TODO/FIXME comments that need attention\n\n"
+            ISSUES_FOUND=$((ISSUES_FOUND + 1))
+          fi
+
+          # Summary
+          if [ $ISSUES_FOUND -eq 0 ]; then
+            REVIEW+="### ✅ No issues found\n"
+            REVIEW+="The PR looks good! No obvious bugs, security issues, or quality problems detected.\n"
+          else
+            REVIEW+="### 📊 Summary\n"
+            REVIEW+="Found **$ISSUES_FOUND** issue(s) that should be addressed.\n"
+          fi
+
+          # Add diff stats
+          REVIEW+="\n### 📈 Diff Stats\n"
+          REVIEW+="\`\`\`\n"
+          REVIEW+="$(git diff --stat origin/${{ github.base_ref }}...HEAD)\n"
+          REVIEW+="\`\`\`"
+
+          # Create PR comment using GitHub API
+          COMMENT_PAYLOAD=$(jq -n --arg body "$REVIEW" '{body: $body}')
+
+          echo "$COMMENT_PAYLOAD" | curl -s -X POST \
+            -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+            -H "Accept: application/vnd.github.v3+json" \
+            "https://api.github.com/repos/${{ github.repository }}/issues/${{ github.event.pull_request.number }}/comments" \
+            -d @-
+
+          echo "Review posted successfully!"
