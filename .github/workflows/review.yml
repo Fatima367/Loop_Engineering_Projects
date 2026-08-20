@@ -1,0 +1,125 @@
+name: pr-review
+
+on:
+  pull_request:
+    types: [opened, synchronize]
+
+jobs:
+  review:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.12'
+
+      - name: Run tests for changed files only
+        id: run_tests
+        run: |
+          pip install pytest
+
+          echo "" > /tmp/all_test_output.txt
+          TOTAL_EXIT_CODE=0
+
+          # Get list of changed files in the PR
+          CHANGED_FILES=$(git diff --name-only origin/${{ github.base_ref }}...HEAD)
+
+          echo "Changed files:" >> /tmp/all_test_output.txt
+          echo "$CHANGED_FILES" >> /tmp/all_test_output.txt
+          echo "========================================" >> /tmp/all_test_output.txt
+
+          # Find directories that have changes
+          DIRS_TO_TEST=""
+          for file in $CHANGED_FILES; do
+            DIR=$(dirname "$file")
+            if [ -n "$DIR" ] && [ "$DIR" != "." ]; then
+              # Check if this directory has a test file
+              if [ -f "$DIR/test_math_utils.py" ]; then
+                # Avoid testing the same directory twice
+                if ! echo "$DIRS_TO_TEST" | grep -q "^${DIR}$"; then
+                  DIRS_TO_TEST="$DIRS_TO_TEST
+$DIR"
+                fi
+              fi
+            fi
+          done
+
+          # Run tests only in changed directories
+          if [ -z "$(echo "$DIRS_TO_TEST" | tr -d '[:space:]')" ]; then
+            echo "No test directories changed." >> /tmp/all_test_output.txt
+          else
+            for dir in $DIRS_TO_TEST; do
+              if [ -n "$dir" ] && [ -d "$dir" ]; then
+                echo "" >> /tmp/all_test_output.txt
+                echo "Running tests in $dir..." >> /tmp/all_test_output.txt
+                echo "========================================" >> /tmp/all_test_output.txt
+
+                cd "$dir"
+                python -m pytest -v 2>&1 | tee -a /tmp/all_test_output.txt
+                DIR_EXIT_CODE=${PIPESTATUS[0]}
+                cd ..
+
+                if [ $DIR_EXIT_CODE -ne 0 ]; then
+                  TOTAL_EXIT_CODE=1
+                fi
+              fi
+            done
+          fi
+
+          echo "exit_code=$TOTAL_EXIT_CODE" >> $GITHUB_OUTPUT
+
+      - name: Create review comment
+        run: |
+          TEST_OUTPUT=$(cat /tmp/all_test_output.txt)
+
+          echo "## Automated PR Review" > /tmp/review.md
+          echo "" >> /tmp/review.md
+
+          if [ "${{ steps.run_tests.outputs.exit_code }}" -eq 0 ]; then
+            echo "### ✅ All Tests Passed" >> /tmp/review.md
+            echo "" >> /tmp/review.md
+            echo "All tests in changed files are passing. This PR looks good!" >> /tmp/review.md
+          else
+            echo "### ❌ Tests Failed" >> /tmp/review.md
+            echo "" >> /tmp/review.md
+
+            echo "### 🐛 Failed Tests:" >> /tmp/review.md
+            echo "" >> /tmp/review.md
+            grep "FAILED" /tmp/all_test_output.txt | sed 's/.*FAILED //' | sed 's/ -.*//' | while read test; do
+              echo "- \`$test\`" >> /tmp/review.md
+            done
+            echo "" >> /tmp/review.md
+
+            echo "### 📋 Error Details:" >> /tmp/review.md
+            echo '```' >> /tmp/review.md
+            grep -B 2 -A 5 "FAILED\|AssertionError\|assert " /tmp/all_test_output.txt >> /tmp/review.md || true
+            echo '```' >> /tmp/review.md
+            echo "" >> /tmp/review.md
+
+            echo "### 💡 Action Required" >> /tmp/review.md
+            echo "Please fix the failing tests before merging." >> /tmp/review.md
+          fi
+
+          echo "" >> /tmp/review.md
+          echo "### 📈 Diff Stats" >> /tmp/review.md
+          echo '```' >> /tmp/review.md
+          git diff --stat origin/${{ github.base_ref }}...HEAD >> /tmp/review.md
+          echo '```' >> /tmp/review.md
+
+      - name: Post review comment
+        run: |
+          COMMENT_BODY=$(cat /tmp/review.md)
+          curl -s -X POST \
+            -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+            -H "Accept: application/vnd.github.v3+json" \
+            "https://api.github.com/repos/${{ github.repository }}/issues/${{ github.event.pull_request.number }}/comments" \
+            -d "$(jq -n --arg body "$COMMENT_BODY" '{body: $body}')"
+          echo "Review posted successfully!"
