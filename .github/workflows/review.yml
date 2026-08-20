@@ -1,125 +1,261 @@
 name: pr-review
 
+# Project 6 — The Doorbell Loop
+# A PR gets reviewed with no prompt typed, by nobody watching.
+#
+# This workflow is deliberately NON-AI: it needs no Anthropic key and no
+# opencode / API key — only the built-in GITHUB_TOKEN that GitHub injects.
+# It triggers on the PR "doorbell" events (opened + synchronize), runs tests
+# ONLY for the files changed in the PR (never the whole repo), and posts a
+# clean, human-readable review comment that flags the planted bug.
+
 on:
   pull_request:
     types: [opened, synchronize]
 
+# If a new commit is pushed while an older review run is in flight, cancel the
+# old run so the synchronize re-fire always gets a fresh, current review.
+concurrency:
+  group: pr-review-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  pull-requests: write
+  statuses: write
+
 jobs:
   review:
     runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      pull-requests: write
     steps:
-      - name: Checkout repository
+      - name: Checkout (full history)
         uses: actions/checkout@v6
         with:
           fetch-depth: 0
 
+      # The base branch may not exist locally on the very first PR. The event
+      # carries base.sha/head.sha explicitly, so we diff those SHAs — this is
+      # what makes the workflow work on the first PR ever opened.
+      - name: Ensure base branch is available locally
+        run: |
+          git fetch --no-tags origin "+refs/heads/${{ github.event.pull_request.base.ref }}:refs/remotes/origin/${{ github.event.pull_request.base.ref }}"
+
       - name: Set up Python
-        uses: actions/setup-python@v4
+        uses: actions/setup-python@v6
         with:
           python-version: '3.12'
 
+      # Collect changed files, then run pytest ONLY on the test files that
+      # cover the changed source (sibling test_name.py, or tests in the changed
+      # dir, with a repo-wide fallback). If a changed Python file has no
+      # discoverable tests, that is itself a FAIL — a silent pass is the worst
+      # outcome for a planted bug.
       - name: Run tests for changed files only
-        id: run_tests
+        id: tests
         run: |
-          pip install pytest
+          set +e
+          BASE_SHA="${{ github.event.pull_request.base.sha }}"
+          HEAD_SHA="${{ github.event.pull_request.head.sha }}"
+          BASE_REF="${{ github.event.pull_request.base.ref }}"
 
-          echo "" > /tmp/all_test_output.txt
-          TOTAL_EXIT_CODE=0
+          # Fall back to the fetched origin ref if the event SHA is unavailable.
+          if ! git cat-file -e "${BASE_SHA}^{commit}" 2>/dev/null; then
+            BASE_SHA="origin/${BASE_REF}"
+          fi
 
-          # Get list of changed files in the PR
-          CHANGED_FILES=$(git diff --name-only origin/${{ github.base_ref }}...HEAD)
+          python -m pip install --quiet pytest
 
-          echo "Changed files:" >> /tmp/all_test_output.txt
-          echo "$CHANGED_FILES" >> /tmp/all_test_output.txt
-          echo "========================================" >> /tmp/all_test_output.txt
+          CHANGED_FILES=$(git diff --name-only "${BASE_SHA}...${HEAD_SHA}" | sort -u)
+          echo "${CHANGED_FILES}" > /tmp/changed_files.txt
 
-          # Find directories that have changes
-          DIRS_TO_TEST=""
-          for file in $CHANGED_FILES; do
-            DIR=$(dirname "$file")
-            if [ -n "$DIR" ] && [ "$DIR" != "." ]; then
-              # Check if this directory has a test file
-              if [ -f "$DIR/test_math_utils.py" ]; then
-                # Avoid testing the same directory twice
-                if ! echo "$DIRS_TO_TEST" | grep -q "^${DIR}$"; then
-                  DIRS_TO_TEST="$DIRS_TO_TEST
-$DIR"
-                fi
-              fi
+          echo "## Changed files in this PR" > /tmp/pytest_output.txt
+          echo '```' >> /tmp/pytest_output.txt
+          echo "${CHANGED_FILES}" >> /tmp/pytest_output.txt
+          echo '```' >> /tmp/pytest_output.txt
+          echo "" >> /tmp/pytest_output.txt
+
+          CHANGED_PY_COUNT=0
+          TEST_FILES=""
+          NO_TEST_DIRS=""
+
+          while IFS= read -r f; do
+            [ -z "$f" ] && continue
+            case "$f" in
+              .github/*) continue ;;
+            esac
+            if [ -f "$f" ] && [ "${f##*.}" = "py" ]; then
+              CHANGED_PY_COUNT=$((CHANGED_PY_COUNT + 1))
+              base="$(basename "$f")"
+              case "$base" in
+                test_*.py|*_test.py)
+                  TEST_FILES="$TEST_FILES $f"     # it IS a test file: run it directly
+                  ;;
+                *)
+                  basecore="${base%.py}"
+                  d="$(dirname "$f")"
+                  # 1) sibling tests for exactly THIS file
+                  found=$(find "$d" -maxdepth 1 \( -name "test_${basecore}.py" -o -name "${basecore}_test.py" \) 2>/dev/null | sort -u)
+                  # 2) else any tests in the same directory
+                  if [ -z "$found" ]; then
+                    found=$(find "$d" -maxdepth 1 \( -name 'test_*.py' -o -name '*_test.py' \) 2>/dev/null | sort -u)
+                  fi
+                  # 3) else a repo-wide lookup for test_<name>
+                  if [ -z "$found" ]; then
+                    found=$(find . -type f \( -name "test_${basecore}.py" -o -name "${basecore}_test.py" \) -not -path './.git/*' 2>/dev/null | sort -u)
+                  fi
+                  if [ -n "$found" ]; then
+                    TEST_FILES="$TEST_FILES $found"
+                  else
+                    NO_TEST_DIRS="$NO_TEST_DIRS $d"
+                  fi
+                  ;;
+              esac
             fi
-          done
+          done < /tmp/changed_files.txt
 
-          # Run tests only in changed directories
-          if [ -z "$(echo "$DIRS_TO_TEST" | tr -d '[:space:]')" ]; then
-            echo "No test directories changed." >> /tmp/all_test_output.txt
-          else
-            for dir in $DIRS_TO_TEST; do
-              if [ -n "$dir" ] && [ -d "$dir" ]; then
-                echo "" >> /tmp/all_test_output.txt
-                echo "Running tests in $dir..." >> /tmp/all_test_output.txt
-                echo "========================================" >> /tmp/all_test_output.txt
+          TOTAL_EXIT=0
+          TESTS_RAN=0
 
-                cd "$dir"
-                python -m pytest -v 2>&1 | tee -a /tmp/all_test_output.txt
-                DIR_EXIT_CODE=${PIPESTATUS[0]}
-                cd ..
-
-                if [ $DIR_EXIT_CODE -ne 0 ]; then
-                  TOTAL_EXIT_CODE=1
-                fi
-              fi
-            done
+          UNIQUE_TESTS=$(echo $TEST_FILES | tr ' ' '\n' | sort -u | tr '\n' ' ')
+          if [ -n "$(echo "$UNIQUE_TESTS" | tr -d '[:space:]')" ]; then
+            echo "## Running tests for the changed files" >> /tmp/pytest_output.txt
+            echo "" >> /tmp/pytest_output.txt
+            for tf in $UNIQUE_TESTS; do echo "  - $tf" >> /tmp/pytest_output.txt; done
+            echo "" >> /tmp/pytest_output.txt
+            python -m pytest -v $UNIQUE_TESTS 2>&1 | tee -a /tmp/pytest_output.txt
+            RC=${PIPESTATUS[0]}
+            TESTS_RAN=1
+            [ "$RC" -ne 0 ] && TOTAL_EXIT=$RC
+            echo "" >> /tmp/pytest_output.txt
           fi
 
-          echo "exit_code=$TOTAL_EXIT_CODE" >> $GITHUB_OUTPUT
-
-      - name: Create review comment
-        run: |
-          TEST_OUTPUT=$(cat /tmp/all_test_output.txt)
-
-          echo "## Automated PR Review" > /tmp/review.md
-          echo "" >> /tmp/review.md
-
-          if [ "${{ steps.run_tests.outputs.exit_code }}" -eq 0 ]; then
-            echo "### [PASS] All Tests Passed" >> /tmp/review.md
-            echo "" >> /tmp/review.md
-            echo "All tests in changed files are passing. This PR looks good!" >> /tmp/review.md
-          else
-            echo "### [FAIL] Tests Failed" >> /tmp/review.md
-            echo "" >> /tmp/review.md
-
-            echo "#### Failed Tests:" >> /tmp/review.md
-            echo "" >> /tmp/review.md
-            grep "FAILED" /tmp/all_test_output.txt | sed 's/.*FAILED //' | sed 's/ -.*//' | while read test; do
-              echo "- \`$test\`" >> /tmp/review.md
+          # Loud accounting so a silent PASS is impossible.
+          if [ "$CHANGED_PY_COUNT" -eq 0 ]; then
+            echo "No Python files changed in this PR — nothing to test." >> /tmp/pytest_output.txt
+          elif [ "$TESTS_RAN" -eq 0 ]; then
+            echo "" >> /tmp/pytest_output.txt
+            echo "⚠ No test files found for the changed Python files — nothing was executed." >> /tmp/pytest_output.txt
+            for d in $NO_TEST_DIRS; do
+              echo "  - changed source dir with no discoverable tests: $d" >> /tmp/pytest_output.txt
             done
-            echo "" >> /tmp/review.md
-
-            echo "#### Error Details:" >> /tmp/review.md
-            echo '```' >> /tmp/review.md
-            grep -B 2 -A 5 "FAILED\|AssertionError\|assert " /tmp/all_test_output.txt >> /tmp/review.md || true
-            echo '```' >> /tmp/review.md
-            echo "" >> /tmp/review.md
-
-            echo "#### Action Required" >> /tmp/review.md
-            echo "Please fix the failing tests before merging." >> /tmp/review.md
+            TOTAL_EXIT=1
           fi
 
-          echo "" >> /tmp/review.md
-          echo "#### Diff Stats" >> /tmp/review.md
-          echo '```' >> /tmp/review.md
-          git diff --stat origin/${{ github.base_ref }}...HEAD >> /tmp/review.md
-          echo '```' >> /tmp/review.md
+          echo "exit_code=$TOTAL_EXIT" >> "$GITHUB_OUTPUT"
+          echo "BASE_SHA=$BASE_SHA" >> "$GITHUB_OUTPUT"
+          echo "HEAD_SHA=$HEAD_SHA" >> "$GITHUB_OUTPUT"
 
-      - name: Post review comment
-        run: |
-          COMMENT_BODY=$(cat /tmp/review.md)
-          curl -s -X POST \
-            -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
-            -H "Accept: application/vnd.github.v3+json" \
-            "https://api.github.com/repos/${{ github.repository }}/issues/${{ github.event.pull_request.number }}/comments" \
-            -d "$(jq -n --arg body "$COMMENT_BODY" '{body: $body}')"
-          echo "Review posted successfully!"
+      # Post one clean, readable review comment + a commit status. The bug
+      # heuristic reads the CHANGED FILES' current contents directly (no git
+      # diff plumbing to trust) and QUOTES the suspicious lines, then maps them
+      # to the failing assertion so a human can read the bug directly.
+      - name: Post review comment and commit status
+        uses: actions/github-script@v8
+        with:
+          script: |
+            const fs = require('fs');
+            const changed = fs.readFileSync('/tmp/changed_files.txt','utf8').trim().split('\n').filter(Boolean);
+            const testOut = fs.readFileSync('/tmp/pytest_output.txt','utf8');
+            const exitCode = Number(process.env.TOTAL_EXIT || 0);
+
+            // 1) Planted-bug heuristic: read each changed .py source, quote lines
+            //    that look like off-by-one / dropped-first-element / inverted-logic.
+            const PATTERNS = [
+              { re: /\[1\s*:\s*\]/, label: 'drops the first element  (sum(items[1:]))' },
+              { re: /=\s*-\s*1\b/,  label: 'subtracts 1  (off-by-one)' },
+              { re: /range\(1\s*,/, label: 'loop starts at 1  (off-by-one)' },
+              { re: /==\s*1\b/,     label: 'compares against 1  (inverted logic?)' },
+            ];
+            const suspicious = [];
+            for (const file of changed) {
+              if (!file.endsWith('.py')) continue;
+              if (/test_[^/]*\.py|[^/]*_test\.py/.test(file)) continue; // skip test files
+              try {
+                const content = fs.readFileSync(file, 'utf8').split('\n');
+                content.forEach((line, i) => {
+                  for (const p of PATTERNS) {
+                    if (p.re.test(line)) {
+                      suspicious.push({ file, line: i + 1, text: line.trim(), label: p.label });
+                      break;
+                    }
+                  }
+                });
+              } catch (e) {}
+            }
+
+            // 2) Failing assertions pulled out of the pytest output.
+            const failing = [];
+            const m = testOut.match(/(FAILED\s+test_.*|E\s+assert .*)/g) || [];
+            failing.push(...m.slice(0, 8));
+
+            // 3) Build the comment.
+            const L = [];
+            L.push('## 🤖 Automated PR Review');
+            L.push('');
+            L.push('Triggered by the `pull_request` **opened** / **synchronize** events');
+            L.push('(the PR doorbell). No prompt was typed and nobody watched the run.');
+            L.push('');
+            L.push('### Files changed in this PR');
+            L.push('```');
+            L.push(changed.join('\n') || '(none)');
+            L.push('```');
+            L.push('');
+            L.push(exitCode === 0 ? '### ✅ Tests for changed files: **PASS**' : '### ❌ Tests for changed files: **FAIL**');
+            L.push('');
+            L.push('### Test output');
+            L.push('');
+            L.push('```');
+            L.push(testOut);
+            L.push('```');
+            L.push('');
+
+            if (suspicious.length > 0) {
+              L.push('### 🐛 Likely planted bug (heuristic — read the quoted lines)');
+              L.push('');
+              for (const s of suspicious.slice(0, 6)) {
+                L.push(`**${s.file}:${s.line}** — ${s.label}`);
+                L.push('```diff');
+                L.push((s.text.startsWith('+') ? '' : '+ ') + s.text);
+                L.push('```');
+              }
+              L.push('');
+              if (failing.length > 0) {
+                L.push('Matching failing assertions:');
+                L.push('');
+                for (const f of failing) { L.push('- `' + f + '`'); }
+                L.push('');
+              }
+              L.push('If the assertion above reads like `assert total([1, 2, 3]) == 6` failing with `5 == 6`, that is `sum(items[1:])` silently dropping the first item.');
+            } else if (failing.length > 0) {
+              L.push('### 🐛 Failing assertions');
+              L.push('');
+              for (const f of failing) { L.push('- `' + f + '`'); }
+              L.push('');
+            }
+
+            L.push('> Deterministic, **non-AI** review — no Anthropic key, no opencode key,');
+            L.push('> `GITHUB_TOKEN` only. It flags bugs by quoting the changed lines and the');
+            L.push('> failing assertions so a human can read the bug directly.');
+            L.push('');
+            L.push('_To re-fire this review, push another commit to the PR (the `synchronize` event is the event heartbeat)._');
+
+            const body = L.join('\n');
+
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              body,
+            });
+
+            await github.rest.repos.createCommitStatus({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              sha: context.payload.pull_request.head.sha,
+              state: exitCode === 0 ? 'success' : 'failure',
+              context: 'pr-review / changed-file tests',
+              description: exitCode === 0 ? 'All tests for changed files pass' : 'Tests for changed files failed or none found',
+              target_url: `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`,
+            });
+        env:
+          TOTAL_EXIT: ${{ steps.tests.outputs.exit_code }}
