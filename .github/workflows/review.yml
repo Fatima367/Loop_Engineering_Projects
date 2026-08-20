@@ -21,41 +21,47 @@ jobs:
         with:
           python-version: '3.12'
 
-      - name: Run tests and analyze
+      - name: Run tests
+        id: run_tests
         run: |
-          # Install pytest
           pip install pytest
+          python -m pytest -v 2>&1 | tee /tmp/test_output.txt
+          echo "exit_code=${PIPESTATUS[0]}" >> $GITHUB_OUTPUT
 
-          # Run tests and capture output
-          python -m pytest -v > /tmp/test_output.txt 2>&1 || true
+      - name: Create review comment
+        run: |
+          # Read test output
+          TEST_OUTPUT=$(cat /tmp/test_output.txt)
 
-          # Analyze results
-          PASSED=$(grep -c "passed" /tmp/test_output.txt || true)
-          FAILED=$(grep -c "failed" /tmp/test_output.txt || true)
-          ERRORS=$(grep -c "error" /tmp/test_output.txt || true)
-
-          # Create review comment
+          # Create review
           echo "## Automated PR Review" > /tmp/review.md
           echo "" >> /tmp/review.md
 
-          if [ "$FAILED" -gt 0 ] || [ "$ERRORS" -gt 0 ]; then
-            echo "### ❌ Tests Failed" >> /tmp/review.md
-            echo "" >> /tmp/review.md
-            echo "**Results:** $PASSED passed, $FAILED failed, $ERRORS errors" >> /tmp/review.md
-            echo "" >> /tmp/review.md
-            echo "### Failed Tests:" >> /tmp/review.md
-            echo '```' >> /tmp/review.md
-            grep -A 10 "FAILED" /tmp/test_output.txt >> /tmp/review.md || true
-            echo '```' >> /tmp/review.md
-            echo "" >> /tmp/review.md
-            echo "### 💡 Suggestion:" >> /tmp/review.md
-            echo "Please fix the failing tests before merging." >> /tmp/review.md
-          else
+          if [ "${{ steps.run_tests.outputs.exit_code }}" -eq 0 ]; then
             echo "### ✅ All Tests Passed" >> /tmp/review.md
             echo "" >> /tmp/review.md
-            echo "**Results:** $PASSED tests passed" >> /tmp/review.md
+            echo "All tests are passing. This PR looks good!" >> /tmp/review.md
+          else
+            echo "### ❌ Tests Failed" >> /tmp/review.md
             echo "" >> /tmp/review.md
-            echo "Great! All tests are passing. This PR looks good to merge." >> /tmp/review.md
+
+            # Extract failed test names
+            echo "### 🐛 Failed Tests:" >> /tmp/review.md
+            echo "" >> /tmp/review.md
+            grep "FAILED" /tmp/test_output.txt | sed 's/.*FAILED //' | sed 's/ -.*//' | while read test; do
+              echo "- \`$test\`" >> /tmp/review.md
+            done
+            echo "" >> /tmp/review.md
+
+            # Show error details
+            echo "### 📋 Error Details:" >> /tmp/review.md
+            echo '```' >> /tmp/review.md
+            grep -A 10 "AssertionError\|ERROR\|assert" /tmp/test_output.txt >> /tmp/review.md || true
+            echo '```' >> /tmp/review.md
+            echo "" >> /tmp/review.md
+
+            echo "### 💡 Action Required" >> /tmp/review.md
+            echo "Please fix the failing tests before merging." >> /tmp/review.md
           fi
 
           # Add diff stats
