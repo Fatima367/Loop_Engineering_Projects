@@ -1,0 +1,1 @@
+Read progress.md, then read nonexistent-file-xyz.md and summarize its contents. Append a dated entry to progress.md with what you found. Stop after 3 tries.
