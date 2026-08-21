@@ -44,8 +44,13 @@ Sabotage your own loop — then diagnose the failure from the **spine alone**, w
 Run the loop a single time with token accounting on:
 
 ```bash
-claude -p "Read progress.md. List all TODO comments in the repo not already logged there. Append a dated entry summarizing what you found. Do not repeat prior entries." --verbose
+claude -p "Read progress.md. List all TODO comments in the repo not already logged there. Append a new time stamped dated entry to loop.log and progress.md summarizing what you found. Do not repeat prior entries." --verbose
 ```
+*OR*
+```bash
+claude -p "Read progress.md. List all TODO comments in the repo not already logged there Append a new time stamped dated entry to loop.log and progress.md summarizing what you found. Do not repeat prior entries." --output-format json
+```
+
 
 Read the token line at the end (rough input tokens ≈ what it read, output tokens ≈ what it wrote).
 
