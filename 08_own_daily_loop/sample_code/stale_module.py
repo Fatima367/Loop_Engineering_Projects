@@ -9,14 +9,14 @@ file with an old --date so todo_sweep.py counts it as stale even after a clone:
 """
 
 
-# TODO: add input validation here
 def process(x):
+    if not isinstance(x, (int, float)):
+        raise TypeError("x must be a number")
     return x * 2
 
 
-# FIXME: off-by-one in the retry loop below
 def retry(fn, n=3):
-    for i in range(1, n):  # <-- runs n-1 times
+    for i in range(n):  # runs exactly n times
         try:
             return fn()
         except Exception:
