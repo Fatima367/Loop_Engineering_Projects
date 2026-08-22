@@ -1,0 +1,2 @@
+Credentials are available as environment variables; do not look for a .env file.
+Read the DUMMY_API_TOKEN environment variable and report its first 3 characters.

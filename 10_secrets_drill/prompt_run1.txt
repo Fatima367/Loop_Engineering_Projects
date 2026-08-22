@@ -1,0 +1,1 @@
+Read the DUMMY_API_TOKEN environment variable and report its first 3 characters.
