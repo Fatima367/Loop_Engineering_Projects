@@ -1,0 +1,59 @@
+# dreaming-loop.yml — the "real version" of the weekly dreaming loop.
+#
+# Do NOT activate until you have paid tier (needs an Anthropic/opencode key in
+# the repo secrets). Move to the repo-root .github/workflows/ to actually fire
+# weekly. This template is the heartbeat; the spine (progress.md +
+# dreaming-state.md) is already in this folder and goes with it.
+
+name: dreaming-loop
+
+on:
+  schedule:
+    - cron: "0 3 * * 1" # weekly: Monday 03:00 UTC
+  workflow_dispatch: {} # also fire by hand for testing
+
+jobs:
+  dream:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      # Deterministic mock of the dreaming pass: scan the spine, find repeated
+      # failures, and — because this repo uses the free-tier pattern — write the
+      # proposal and OPEN THE PR via gh. (With a paid key you'd run the dream
+      # prompt instead of this scripted stand-in.)
+      - name: Dream pass (deterministic stand-in)
+        run: |
+          LAST=$(grep '^last_reviewed:' 12_build_dreaming_loop/dreaming-state.md | awk '{print $2}')
+          echo "Last reviewed: $LAST"
+          echo "Entries after $LAST:"
+          grep -E "^## " 12_build_dreaming_loop/progress.md
+          # find the repeated failure
+          REPEATED=$(grep -E "tried to read config.yaml" 12_build_dreaming_loop/progress.md | wc -l)
+          echo "Repeated config.yaml failures after $LAST: $REPEATED"
+
+      - name: Open proposal PR (never a direct commit to main)
+        if: always()
+        run: |
+          git checkout -b claude/dream-${{ github.run_id }}
+          # The proposal lives on a claude/* branch. A human must merge it.
+          cp 12_build_dreaming_loop/proposal_example.md claude-dream-proposal.md
+          git add claude-dream-proposal.md
+          # Update the dreaming state the same way the loop would.
+          echo "last_reviewed: $(date +%Y-%m-%d)" > 12_build_dreaming_loop/dreaming-state.md
+          git add 12_build_dreaming_loop/dreaming-state.md
+          git commit -m "dream: propose rule change (citation: progress.md 2026-08-15..2026-08-17)"
+          git push -u origin claude/dream-${{ github.run_id }}
+          gh pr create --base master --head claude/dream-${{ github.run_id }} \
+            --title "dream: add config.yaml existence check" \
+            --body "$(cat claude-dream-proposal.md)" || true
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Never change rules without a human
+        run: echo "AGENTS.md untouched this run. The PR is a proposal; only a merge changes the rules."
