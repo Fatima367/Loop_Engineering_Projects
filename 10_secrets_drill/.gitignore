@@ -1,0 +1,4 @@
+# The whole drill: .env must never be committed.
+.env
+*.env
+!*.env.example
