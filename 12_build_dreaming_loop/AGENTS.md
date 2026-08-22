@@ -9,4 +9,4 @@ a human merges the proposal's PR — a loop that guesses is worse than no loop.
 1. Never commit directly to main — work on a `claude/*` branch and open a PR.
 2. Run the test suite before reporting any fix as done.
 3. Append a dated entry to progress.md every run.
-4. Always pin dependency versions with an exact version number.
+4. Always check a file exists before reading it.
