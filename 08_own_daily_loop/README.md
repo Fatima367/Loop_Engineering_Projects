@@ -1,30 +1,24 @@
 # 08 — Your Own Daily Loop (Capstone)
 
 **Project 8 of the Loop Engineering Series**
-Difficulty: capstone · Time: 2–4 hrs · Concepts: All Six Parts
+Difficulty: capstone · Time: 2–4 hrs · Concept: The Full Six-Part Loop
 
 ---
 
 ## Goal
 
-Build the **full six-part loop** on a real, boring, recurring chore — trusted enough to run unattended. The chore for this capstone: **flag TODO/FIXME comments in the repo that are older than 30 days.**
+Build the complete six-part loop on a real, boring, recurring chore — trusted enough to run unattended.
 
 ---
 
 ## What This Project Demonstrates
 
-Every loop needs six parts. This project wires all of them into one loop:
-
-| # | Part | Where in this project |
-|---|------|------------------------|
-| 1 | **Heartbeat** | What wakes the loop — here, a scheduled `on: schedule` / hand-run pass |
-| 2 | **Worktree** | Each run edits in its own checkout (branch or worktree) — main stays clean |
-| 3 | **Skill** | `todo-sweep` SKILL.md codifies the chore's steps |
-| 4 | **Maker-checker** | Implementer drafts · reviewer grades · PR only on PASS |
-| 5 | **Connector** | An actual PR (or a summary in `progress.md`) reaches the outside world |
-| 6 | **Spine** | `progress.md` — updated every run, read every run |
-
-Plus **budget guards**: a fixed hand-run cadence, a 1-review-round cap, and a stop clause — so nothing ever runs away on the free tier.
+- Wiring **all six parts** of a loop into a single workflow: heartbeat, worktree, skill, maker-checker, connector, and spine
+- Writing a **deterministic checker** (`todo_sweep.py`) that decides whether there is new work — the agent doesn't guess
+- Using a **skill** (`SKILL.md`) to encode the chore's steps once, so every run follows the same instructions
+- Running a **maker-checker** pattern: the implementer does the work, a reviewer agent grades it, and a PR opens only on PASS
+- Updating a **spine** (`progress.md`) every run — the run history lives in one file that the next run reads before starting
+- Driving the loop **by hand** on a free-tier budget instead of a live schedule, while proving the same six-part shape holds
 
 ---
 
@@ -32,81 +26,153 @@ Plus **budget guards**: a fixed hand-run cadence, a 1-review-round cap, and a st
 
 | File | Purpose |
 |------|---------|
-| `todo_sweep.py` | **The checker.** Deterministic: finds TODO/FIXME in `sample_code/` older than 30 days, appends new ones to `progress.md`, exit 1 if there's new work. |
-| `run_daily_pass.sh` | Hand-run driver for the loop body (free-tier version of a daily schedule). |
-| `sample_code/stale_module.py` | Deliberately stale TODO + FIXME (commit with an old `--date` so it's flagged). |
-| `sample_code/fresh_module.py` | Recent TODO — correctly **not** flagged by the 30-day window. |
-| `progress.md` | The spine — dated entries proving the loop builds on its own memory. |
-| `.claude/skills/todo-sweep/SKILL.md` | The chore's skill (Claude Code). |
-| `.claude/agents/reviewer.md` | The reviewer (Claude Code) — grades the diff, replies PASS/FAIL. |
-| `.opencode/skills/todo-sweep/SKILL.md` · `.opencode/agents/reviewer.md` | The same for opencode. |
-| `README.md` · `output.md` | This doc · template transcript. |
+| `todo_sweep.py` | The deterministic checker — scans `sample_code/` for TODO/FIXME comments older than 30 days, appends new candidates to `progress.md`, and exits non-zero when there is work to do. |
+| `run_daily_pass.sh` | Bash wrapper that drives one pass by hand: runs the checker, logs timestamps to `run_log.txt`, and propagates the exit code. |
+| `progress.md` | The spine — a dated log of every run. Each entry records what was found (or not) and whether the reviewer passed or failed the diff. |
+| `run_log.txt` | Raw timestamps of each manual pass (start/end). Proves the loop ran multiple times. |
+| `output.md` | Full transcript of a live Claude session running the loop end-to-end: checker → fix → reviewer → PR → spine update. |
+| `sample_code/stale_module.py` | Test fixture — a module with old TODO/FIXME comments (committed with a backdated `--date`) so the checker flags them. |
+| `sample_code/fresh_module.py` | Test fixture — a module with a recent TODO that the checker correctly ignores (< 30 days). |
+| `.claude/skills/todo-sweep/SKILL.md` | The skill — step-by-step instructions for the chore, invoked by name each run. |
+| `.claude/agents/reviewer.md` | The reviewer agent — grades a diff as PASS or FAIL. Never edits files. |
 
 ---
 
 ## How It Works
 
-### 1. Make the mock data believably stale
+### The Six Parts
+
+| Part | What it is here | Where it lives |
+|------|----------------|----------------|
+| **Heartbeat** | A deterministic checker (`todo_sweep.py`) that runs on a schedule (or by hand) and decides if there is work | `todo_sweep.py` + `run_daily_pass.sh` |
+| **Worktree** | Each run isolates its edits in a git worktree so one pass can't clobber another | Branch `fix/stale-todo-fixme` (created per run) |
+| **Skill** | The chore's steps written once in `SKILL.md`, so the agent follows the same procedure every time | `.claude/skills/todo-sweep/SKILL.md` |
+| **Maker-checker** | The implementer does the sweep and fix; a reviewer agent grades the diff before anything ships | `.claude/agents/reviewer.md` |
+| **Connector** | On PASS, the loop opens a real PR on GitHub — not a dry run | `gh pr create` in the output transcript |
+| **Spine** | `progress.md` is updated every run and read every run — the loop's memory across days | `progress.md` |
+
+### 1. The Checker (`todo_sweep.py`)
+
+The checker is a plain Python script — no agent needed to run it. It:
+
+1. Walks `sample_code/` for `.py` files containing `# TODO:` or `# FIXME:` comments
+2. Determines staleness from each file's git commit date (falling back to mtime), using a 30-day threshold
+3. Compares found items against what is already logged in `progress.md`
+4. Appends a new dated entry to `progress.md` with any newly discovered stale candidates
+5. Exits **0** (nothing to do) or **1** (new work found — hand off to the maker-checker)
+
+This is the key insight: a **command** decides whether there is work, not the agent. The agent only acts when the checker says there is something to do.
+
+### 2. The Skill (`SKILL.md`)
+
+The skill encodes the chore's steps once:
+
+```
+1. Run python todo_sweep.py
+2. Read the candidates. For each stale item, make the smallest sensible change.
+3. Do not touch test files.
+4. Have the reviewer agent grade the diff — open a PR only on PASS.
+5. Confirm progress.md picked up the run, and stop after 1 review round.
+```
+
+Every run invokes the same skill. The agent doesn't reinvent the procedure each time.
+
+### 3. The Maker-Checker
+
+- **Maker**: The agent runs the checker, reads the candidates, makes the smallest fix, and stages the diff.
+- **Checker (reviewer)**: A separate agent (`reviewer.md`) grades the diff. It checks that tests pass, the fix is minimal, and no test files were touched. It replies **PASS** or **FAIL** with reasons.
+- A PR is opened **only on PASS**. On FAIL, the loop stops and logs the failure to `progress.md`.
+
+### 4. The Connector
+
+On PASS, the loop runs:
 
 ```bash
-git add sample_code/stale_module.py
-git commit -m "add stale module with old TODO/FIXME" --date "2026-07-01T09:00:00"
-GIT_COMMITTER_DATE="2026-07-01T09:00:00" git commit --amend --no-edit
+git push -u origin fix/stale-todo-fixme
+gh pr create --base master --head fix/stale-todo-fixme
 ```
 
-Now `stale_module.py` is older than 30 days, and `todo_sweep.py` will trust the git date (not your mtime). `fresh_module.py` stays recent, so its TODO is ignored — proving the window logic.
+This opens a real, mergeable PR on GitHub — not a simulation. In the live run, this produced [PR #5](https://github.com/Fatima367/Loop_Engineering_Projects/pull/5).
 
-### 2. Run the checker once (the maker's first step)
+### 5. The Spine (`progress.md`)
+
+Every run appends a timestamped section to `progress.md`. The next run reads it first to avoid re-reporting the same stale items. The spine is the loop's memory across days.
+
+Example entries:
+
+```
+## 2026-08-19 09:00:00
+- sample_code/stale_module.py:5 — TODO: implement caching
+- sample_code/stale_module.py:12 — FIXME: handle edge case
+
+## 2026-08-22 12:50:00
+No new stale items. Sweep clean.
+- reviewer: PASS — PR #5 opened
+```
+
+---
+
+## Running It
+
+### By Hand (Free-Tier Version)
+
+Run the daily pass 3–4 times over a few days to prove the six-part shape:
 
 ```bash
-python todo_sweep.py
-```
+# One pass
+./run_daily_pass.sh
 
-A **command** — not the agent — decides if there's work. New stale candidates get logged to `progress.md` and the exit code says "hand to the reviewer."
-
-### 3. Run the full loop on the Claude Code path
-
-```
-/goal Following the todo-sweep skill, do today's pass, have the reviewer grade it, open a PR only on PASS, and update progress.md. Stop after 1 review round.
-```
-
-On the opencode path:
-
-```bash
-opencode run "using the todo-sweep skill, run python todo_sweep.py, review the stale items, fix them, have @reviewer grade the diff, open a PR only on PASS"
-```
-
-### 4. Repeat by hand for a few "days"
-
-Free-tier scope-down: a real daily cloud schedule burns quota fast. Instead run the same body 3–4 times over a few days:
-
-```bash
+# Four fake "days" in sequence
 for i in 1 2 3 4; do ./run_daily_pass.sh; sleep 2; done
 ```
 
-Each "day" is one beat of the heartbeat — you are the scheduled trigger. The task: **flag TODO/FIXME comments older than 30 days, fix them via maker-checker, open a PR on PASS, update `progress.md`.**
+Each pass runs the checker, logs timestamps, and the agent follows the skill to do the rest.
 
-### 5. Trust it because you read it
+### Full Loop via Claude Code
 
-At the end, read `progress.md`. You should trust what the loop shipped *because you read it*, not because you stopped reading. If you don't understand its changes, slow the loop down.
+Invoke the skill directly:
+
+```
+/todo-sweep
+```
+
+Or run the goal prompt:
+
+```
+Following the todo-sweep skill, do today's pass, have the reviewer grade it, open a PR only on PASS, and update progress.md. Stop after 1 review round.
+```
+
+This triggers the full chain: checker → fix → reviewer → PR → spine update.
 
 ---
 
 ## What "Done" Looks Like
 
 ```
-=== todo_sweep pass @ 2026-08-20 09:00:01 ===
-Found 2 new stale TODO/FIXME (older than 30 days):
-  - sample_code/stale_module.py:9  [50d] TODO: add input validation here
-  - sample_code/stale_module.py:16 [50d] FIXME: off-by-one in the retry loop below
+● Running today's sweep.
+  ⎿  === todo_sweep pass @ 2026-08-22 12:50:52 ===
+     No new stale TODO/FIXME comments to report (or already logged). Nothing to do.
 
-Logged 2 new entries to progress.md.
+● Sweep is clean — no stale items remain. I'll update progress.md for today.
 
-[reviewer] PASS — diff fixes both stale comments, no test files touched.
+  ⎿  Edit progress.md — appended "## 2026-08-22 12:50:00" entry
 
-PR opened: fix stale TODO/FIXME in sample_code
+● Reviewer returned PASS. Opening the PR now.
 
-[second run] No new stale TODO/FIXME comments to report (or already logged).
+  ⎿  Bash: git push -u origin fix/stale-todo-fixme → SUCCESS
+     Bash: gh pr create --base master --head fix/stale-todo-fixme → PR #5 opened
+
+● All steps complete:
+  ┌──────────────────┬─────────────────────────────────────────┐
+  │       Step       │                Result                   │
+  ├──────────────────┼─────────────────────────────────────────┤
+  │ todo_sweep.py    │ No new stale TODO/FIXME — sweep clean   │
+  │ Reviewer grade   │ PASS                                    │
+  │ PR opened        │ #5 — MERGEABLE                          │
+  │ progress.md      │ 2026-08-22 entry + PR #5 recorded       │
+  └──────────────────┴─────────────────────────────────────────┘
+
+✔ Goal achieved (9m · 1 turn)
 ```
 
 ---
@@ -115,29 +181,64 @@ PR opened: fix stale TODO/FIXME in sample_code
 
 | Command | What it does |
 |---------|--------------|
-| `python todo_sweep.py` | The checker — finds stale TODO/FIXME, writes the spine |
-| `./run_daily_pass.sh` | One hand-run beat of the loop |
-| `/goal <prompt>` | Claude Code loop with a self-written "stop after" clause |
-| `opencode run "<prompt>"` | OpenCode equivalent |
-| `@reviewer` | Grade the diff (PASS/FAIL) |
-| `git worktree add <path> -b <branch>` | Isolate a run's edits (part 2: worktree) |
+| `./run_daily_pass.sh` | Drive one daily pass by hand (checker + logging) |
+| `python todo_sweep.py` | Run the checker alone — returns 0 (clean) or 1 (new work) |
+| `/todo-sweep` | Invoke the full skill via Claude Code |
+| `gh pr view 5` | Check the PR the loop opened |
+| `cat progress.md` | Read the spine — the loop's run history |
 
 ---
 
-## Real Version (paid tier)
+## Concept: The Full Loop
 
-Set it all up as one **live cloud Routine** on a **daily** schedule: repo attached, `.claude/skills/todo-sweep/` and `.claude/agents/reviewer.md` committed, **Allow unrestricted branch pushes off** (pushes only to `claude/*`), the spine = `progress.md` in the repo. Let it fire **2–3 times on its actual schedule** (not Run-now), read the results, then pause the schedule once the six parts hold together. You don't need a full week to learn the lesson.
+The capstone brings together every concept from the series:
+
+1. **Heartbeat** (Project 1) — a recurring check that decides if there is work
+2. **Worktree isolation** (Project 2) — each run edits in its own branch
+3. **Skill-driven execution** (Project 3) — the chore's steps are written once, not re-invented
+4. **Maker-checker** (Project 5) — implementer and reviewer are separate agents with separate incentives
+5. **Connector** (Project 6) — the loop talks to the real world (GitHub PRs)
+6. **Spine** (Project 7) — `progress.md` is the loop's memory, read before every run
+
+The difference between this and earlier projects: nothing here is simulated. The checker is a real script. The PR is a real PR. The spine is a real file that accumulates history across days. The loop runs unattended because you trust the **shape**, not because you watched it.
 
 ---
 
 ## Completion Criteria
 
-✅ All six parts (heartbeat, worktree, skill, maker-checker, connector, spine) are present and named
-✅ A command (`todo_sweep.py`), not the agent, decides when there's work
-✅ Old TODO/FIXME get flagged; recent ones don't
-✅ The maker-checker gate blocks a PR until the reviewer says PASS
-✅ `progress.md` is read every run and updated every run (no repeated entries)
-✅ It has run by hand multiple times and you read — and understood — what it shipped
+✅ Deterministic checker (`todo_sweep.py`) decides whether there is work — the agent doesn't guess
+
+✅ Skill (`SKILL.md`) encodes the chore's steps once, invoked by name every run
+
+✅ Maker-checker pattern: implementer fixes, reviewer grades PASS/FAIL
+
+✅ Connector: a real PR opens on GitHub only on PASS
+
+✅ Spine (`progress.md`) is updated every run and read every run
+
+✅ Run log (`run_log.txt`) proves the loop ran multiple times
+
+✅ You trust what it ships because you read it, not because you stopped reading
+
+---
+
+## Practice Version (This Run)
+
+This version scopes the chore small and runs by hand 3–4 times over a few days instead of via a live schedule, to prove the six-part shape without sustained cloud usage.
+
+---
+
+## Real Version (Requires Paid Plan)
+
+The course's actual capstone is a live cloud Routine on a daily schedule, left running unattended for roughly a week, with every part (worktree, skill, maker-checker, connector, spine) wired into one Routine config rather than run by hand.
+
+To see the real thing at least once:
+
+1. **Set it up** exactly as above but as a Routine with a daily trigger
+2. **Let it fire 2–3 times** on its actual schedule (not Run-now) — confirm the six parts hold together across real unattended runs
+3. **Pause it** once you've confirmed the shape (the pause toggle stops the schedule without deleting the config)
+
+You don't need a full week to learn the lesson — a few real unattended fires is enough to feel the difference from the hand-run version.
 
 ---
 
