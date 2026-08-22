@@ -1,1 +1,1 @@
-Summarize yesterday's commits onto a claude/summary branch.
+Summarize yesterday's commits, write to summary.md onto a claude/summary branch.
