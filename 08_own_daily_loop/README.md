@@ -109,14 +109,6 @@ PR opened: fix stale TODO/FIXME in sample_code
 [second run] No new stale TODO/FIXME comments to report (or already logged).
 ```
 
-*(Paste your real per-day output after running.)*
-
-```
-{{PASTE_RUN_1}}
-{{PASTE_RUN_2}}
-{{PASTE_RUN_3}}
-```
-
 ---
 
 ## Key Commands
