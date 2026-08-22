@@ -1,24 +1,22 @@
 # 07 — Break It on Purpose
 
 **Project 7 of the Loop Engineering Series**
-Difficulty: medium · Time: 45–60 min · Concepts: Observability, Cost (Concept 13), Acceptable Failure
+Observability + Concept 13 (cost) · Difficulty: medium · Time: 45–60 min
 
 ---
 
 ## Goal
 
-Sabotage your own loop — then diagnose the failure from the **spine alone**, without replaying the run. While you're at it, learn exactly how much your loop costs per month.
+Sabotage your own loop, then diagnose the failure from the spine alone — without replaying the full run.
 
 ---
 
 ## What This Project Demonstrates
 
-- **Measuring one beat** of a loop: how many tokens a single run reads and writes
-- **Concept 13 — cost**: multiplying a beat by its cadence to get a monthly price
-- **Sabotaging on purpose**: pointing the prompt at a file that does not exist, with a limit set
-- **Diagnosing from the spine alone**: reading `progress.md` + `loop.log` and knowing what failed and when — no full replay
-- **Failing loud, not silent**: the loop leaves a clear **"needs a human"** note instead of silently degrading
-- Rehearsing the overnight failure now, while it is cheap and you are watching
+- **Measuring cost** — how many tokens one beat reads and writes, and what that means at your cadence (Concept 13)
+- **Sabotaging a loop** — making it fail on purpose so you can see what failure looks like
+- **Diagnosing from the spine** — reading `progress.md` and `loop.log` to figure out what went wrong and when, without re-running anything
+- **Observability** — ensuring the loop leaves behind enough signal for a human to diagnose it cold
 
 ---
 
@@ -26,14 +24,12 @@ Sabotage your own loop — then diagnose the failure from the **spine alone**, w
 
 | File | Purpose |
 |------|---------|
-| `sabotaged_prompt.txt` | The prompt pointed at a nonexistent file — the sabotage. |
-| `progress.md` | The spine the loop writes. Shows dated entries including the failed beat and a "needs a human" note. |
-| `loop.log` | The audit trail — one line per beat with exit code, error, and `needs_human` flag. |
-| `monthly_cost_estimate.md` | Worked formula for tokens-per-beat × beats-per-month, with placeholders for your real numbers. |
-| `README.md` | This document. |
-| `output.md` | Template transcript — paste your real measured run / diagnosis after you run Project 7. |
-
-> **Reuse Project 3's loop** — this project sabotages the morning-brief loop you built in `03_brief_with_memory/`. Copy its prompt shape and its `app.py` + `progress.md`.
+| `app.py` | The loop's target — a small Python file with 3 TODO comments the loop scans for |
+| `progress.md` | The spine — a running log of every scan result. What the loop left behind for diagnosis. |
+| `loop.log` | Structured log lines (exit code, message, needs_human flag) — the spine's quick-look signal |
+| `sabotaged_prompt.txt` | The sabotage prompt — points at a file that does not exist |
+| `monthly_cost_estimate.md` | One beat's token count × cadence = monthly cost |
+| `output.md` | Full transcript of the normal run and the sabotaged run side by side |
 
 ---
 
@@ -41,128 +37,113 @@ Sabotage your own loop — then diagnose the failure from the **spine alone**, w
 
 ### 1. Measure one beat's cost
 
-Run the loop a single time with token accounting on:
+Run the loop's prompt once with verbose output to capture token counts:
 
 ```bash
-claude -p "Read progress.md. List all TODO comments in the repo not already logged there. Append a new time stamped dated entry to loop.log and progress.md summarizing what you found. Do not repeat prior entries." --verbose
-```
-*OR*
-```bash
-claude -p "Read progress.md. List all TODO comments in the repo not already logged there Append a new time stamped dated entry to loop.log and progress.md summarizing what you found. Do not repeat prior entries." --output-format json
+claude -p "Read progress.md. List all TODO comments in the repo not already logged there. Append a new timestamped entry to loop.log and progress.md summarizing what you found." --allowedTools "Read,Edit" --output-format json
 ```
 
+Read the token line from the JSON output. Our measurement:
 
-Read the token line at the end (rough input tokens ≈ what it read, output tokens ≈ what it wrote).
+- **Input:** 93,069 tokens (fresh) + 94,592 (cached)
+- **Output:** 1,206 tokens
+- **Total per beat:** ~188,867 tokens · **Cost:** ~$0.42
 
-### 2. Compute the monthly cost
+Multiply by your cadence to get monthly cost:
+
+| Cadence | Beats/month | Monthly tokens | Monthly cost (Sonnet 5) |
+|---------|-------------|----------------|--------------------------|
+| Daily | 30 | 5.7M | ~$12 |
+| Hourly | 720 | 136M | ~$299 |
+
+See `monthly_cost_estimate.md` for the full breakdown across models.
+
+### 2. Sabotage it
+
+Edit the prompt to point at a file that does not exist:
 
 ```
-monthly_cost = tokens_per_beat × beats_per_month
+claude -p "Read nonexistent-file-xyz.md, find new TODOs, append a dated summary to progress.md" --allowedTools "Read,Edit"
 ```
 
-Daily cadence → ×30. Hourly cadence → ×720. Fill in `monthly_cost_estimate.md`.
+Or give it an unreachable success condition:
 
-### 3. Sabotage the loop — point it at a file that does not exist
-
-```bash
-claude -p "$(cat 07_break_it_on_purpose/sabotaged_prompt.txt)"
+```
+/goal All tests pass and the file impossible-marker.txt exists. Stop after 3 tries.
 ```
 
-The prompt reads `nonexistent-file-xyz.md`, which cannot be found. Because the prompt has a limit built in ("Stop after 3 tries"), the loop gives up after 3 attempts instead of running forever.
+The sabotaged prompt is saved in `sabotaged_prompt.txt` for reference.
 
-> **Real version:** if your Project 3 loop is a live cloud Routine, edit its prompt the same way, fire it **once** (Run now / one-off schedule — not the recurring one), and let it fail in the cloud.
+### 3. Diagnose from the spine alone
 
-### 4. Diagnose from the spine alone — no replaying
+Do **not** re-run the loop. Open only these two files:
 
-Do **not** re-run anything. Read only:
+- **`loop.log`** — check the log line. What does the exit code say? What does the message say? Is `needs_human=true`?
+- **`progress.md`** — read the latest entry. What did the loop report? Did it leave a clear note, or did it fail silently?
 
-```bash
-cat 07_break_it_on_purpose/progress.md
-cat 07_break_it_on_purpose/loop.log
-```
-
-Answer three questions from those two files alone:
-
-1. **What failed?** → `nonexistent-file-xyz.md not found`
-2. **When?** → `2026-08-20 09:00:00` (and the two retries after it)
-3. **Did it leave a "needs a human" note?** → yes: `⚠ needs a human` in `progress.md`, and `needs_human=true` in `loop.log`
-
-That is the whole lesson: the spine + a one-line audit log are enough to know a run failed, why, and when — without watching or replaying.
+From those two signals alone, answer:
+1. **What failed?** The loop tried to read `nonexistent-file-xyz.md` — the file does not exist.
+2. **When?** The timestamp in the log entry tells you exactly when it fired.
+3. **Did it fail silently?** No — the log line has `needs_human=true` and `progress.md` has a dated note: "Attempted to read nonexistent-file-xyz.md — file does not exist after 3 tries."
 
 ---
 
 ## What "Done" Looks Like
 
-Reading `progress.md` and `loop.log` alone, you can already say:
-
 ```
-What failed:   the loop tried to read nonexistent-file-xyz.md
-               but the file does not exist.
-When:          2026-08-20 09:00:00 (3 attempts, all exit=1)
-Needs a human: yes — progress.md says "⚠ needs a human."
+## 2026-08-21 17:45
+
+- Attempted to read nonexistent-file-xyz.md - file does not exist after 3 tries.
 ```
 
-*(Paste your own measured run below.)*
+And in `loop.log`:
 
 ```
-{{PASTE_YOUR_DIAGNOSIS_FROM_SPINE}}
+[2026-08-21 17:45:11] exit=1 message="nonexistent-file-xyz.md does not exist after 3 tries" needs_human=true
 ```
+
+No re-run needed. The spine tells the whole story.
 
 ---
 
-## Key Commands
+## Key Concepts
 
-| Command | What it does |
-|---------|--------------|
-| `claude -p "<prompt>" --verbose` | Run one beat with token accounting |
-| `cat progress.md` | Read the spine — the loop's memory |
-| `cat loop.log` | Read the audit trail — one line per beat |
-| `grep needs_human loop.log` | Confirm the loop failed loud, not silent |
+### The spine
 
----
+The **spine** is whatever the loop leaves behind when it finishes — log lines, progress entries, output files. A good spine lets you diagnose failures without replaying the run. If your loop fails and leaves nothing, you're flying blind.
 
-## Concept: Observed Cost (Concept 13) + Failure Observability
+### Observability (Concept 14)
 
-**Cost:** a loop that runs unattended has a price tag you can compute before you trust it:
+A green status only means the session ended without an infrastructure error — **it never means the task succeeded.** You have to open the transcript and read it to know the difference. The log line + progress.md pattern makes this concrete.
 
-```
-monthly = tokens_per_beat × beats_per_month
-```
+### Cost (Concept 13)
 
-A 1,000-token daily beat is ~30,000 tokens/month — trivial. An hourly beat is 720× — suddenly it's worth shortening the prompt or slowing the cadence.
-
-**Observability:** the difference between a loop you trust and a loop you *fear* is a log line.
-
-```
-loop.log → exit=1 error="nonexistent-file-xyz.md not found" needs_human=true
-```
-
-If your loop fails **silently** (no log line, no "needs a human"), you will not notice for days. Fix that first: add the log line to the prompt so every beat records its exit code and error. You are rehearsing the overnight failure now, while it is cheap and you are watching.
+Every beat has a token price. Multiply by cadence to get monthly cost. Knowing this number lets you:
+- Choose the right cadence (daily vs hourly vs weekly)
+- Shorten the prompt if it's too expensive
+- Scope the loop smaller before it runs overnight
 
 ---
 
 ## Completion Criteria
 
-✅ You can say what failed and when **from the spine alone** (`progress.md` + `loop.log`)
-
-✅ The loop left a clear **"needs a human"** note — it did not fail silently
-
-✅ You know your loop's monthly cost at its current cadence (and could halve that cadence tomorrow)
-
-✅ The sabotage ran with a limit set — it stopped, it didn't loop forever
+✅ Measured one beat's token count and calculated monthly cost at your cadence
+✅ Sabotaged the loop with an unreachable condition (nonexistent file or impossible goal)
+✅ Loop fired, failed, and left a clear log line + progress entry
+✅ Diagnosed what failed and when from the spine alone — no replay
+✅ Loop left a "needs a human" note instead of failing silently
 
 ---
 
-## Real Version
+## Real Version (Cloud Routine)
 
-With a live cloud Routine, the sabotage and diagnosis are identical but run on Anthropic's servers:
+If Project 3 is running as a live Routine, sabotage it there instead:
+1. Edit the Routine's prompt to point at a nonexistent file
+2. Fire it with **Run now** (not the recurring schedule)
+3. Open the Routine's detail page and read the run transcript
+4. Diagnose from the transcript — same spine, just hosted
 
-1. Edit the Routine's prompt to read `nonexistent-file-xyz.md`.
-2. Fire it **once** with **Run now** (free, doesn't count against the daily cap).
-3. Diagnose from the **run transcript** on the Routine's detail page — not the terminal.
-4. Notice the recorded **green status** despite the failed task.
-
-The lesson sharpens at full scale: **a green status only means the session ended without an infrastructure error.** It never means the task succeeded. You must open the transcript and read it to tell the difference.
+This makes the lesson concrete: a green Routine status doesn't mean the task succeeded. You have to read the transcript.
 
 ---
 
