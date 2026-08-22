@@ -1,0 +1,48 @@
+# Gate B — EXECUTE (real version, project-local template)
+#
+# Do NOT activate until you have paid tier (needs an Anthropic/opencode key in
+# the repo secrets). Move to the repo-root .github/workflows/ if/when you do.
+# B runs ONLY after a human approves Gate A's draft: the trigger is a
+# pull_request_review with state == 'approved'. Your PR approval *is* the human
+# gate — the same principle as firing Routine B's API trigger yourself.
+
+name: gate-b-execute
+
+on:
+  pull_request_review:
+    types: [submitted]
+
+jobs:
+  execute:
+    if: github.event.review.state == 'approved'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      # Deterministic substitute for Routine B's "append to CHANGELOG + PR" step.
+      - name: Append approved entry and open a publish branch
+        run: |
+          git fetch origin claude/draft:claude/draft || true
+          DRAFT=$(git show origin/claude/publish:11_build_two_routine_gate/CHANGELOG.md 2>/dev/null \
+                   || cat 11_build_two_routine_gate/CHANGELOG.md)
+          git checkout -b claude/publish
+          cat 11_build_two_routine_gate/draft_approved.txt >> 11_build_two_routine_gate/CHANGELOG.md
+          git add 11_build_two_routine_gate/CHANGELOG.md
+          git commit -m "chore: apply approved changelog entry"
+          git push -u origin claude/publish
+
+      - name: Open PR for the published changelog
+        run: |
+          gh pr create --base master --head claude/publish \
+            --title "chore: apply approved changelog entry" \
+            --body "$(cat 11_build_two_routine_gate/draft_approved.txt)" || true
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: B's proof
+        run: echo "B ran only because the human approved. Transcript shows the action happened."

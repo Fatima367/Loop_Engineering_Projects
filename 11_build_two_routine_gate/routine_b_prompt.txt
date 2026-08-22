@@ -1,0 +1,1 @@
+Read the approved changelog entry from the claude/draft branch and append it to CHANGELOG.md on a new claude/publish branch. Open a PR.

@@ -1,0 +1,38 @@
+# Gate A — DRAFT (real version, project-local template)
+#
+# Do NOT activate until you have paid tier (needs an Anthropic/opencode key in
+# the repo secrets). Move to the repo-root .github/workflows/ if/when you do.
+# A drafts, never merges; B (gate-b-execute.yml) only runs after a human
+# approval review.
+
+name: gate-a-draft
+
+on:
+  # A drafts when there is anything to draft about. Use the first PR event, or
+  # swap for `workflow_dispatch` if you only ever fire A by hand.
+  pull_request:
+    types: [opened]
+
+jobs:
+  draft:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      # Deterministic substitute for Routine A's "draft" step — writes a draft
+      # file to a claude/draft branch. Never touches main.
+      - name: Draft to claude/draft branch
+        run: |
+          git checkout -b claude/draft
+          LAST_MSG=$(git log -1 --pretty=%s)
+          printf '%s\n' "Draft changelog entry for commit: $LAST_MSG" > 11_build_two_routine_gate/draft_approved.txt
+          git add 11_build_two_routine_gate/draft_approved.txt
+          git commit -m "draft: proposal awaiting human approval"
+          git push -u origin claude/draft
+
+      - name: Announce the draft
+        run: echo "Draft on claude/draft. Human reviews, then fires gate-b (via an approval PR review)."
